@@ -24,14 +24,14 @@ def compare_prices_and_identify_problems_revised(df, all_rates):
 
         # Check a data de referência
         if ref_date in all_rates and n_dias in all_rates[ref_date].index:
-            preco_b3_ref = all_rates[ref_date].loc[n_dias, 'taxas252']
+            preco_b3_ref = all_rates[ref_date].loc[n_dias, 'taxas252'] * 100
             df.loc[index, 'preco_b3_referencia'] = preco_b3_ref
             if np.isclose(row['preco_data_referencia'], preco_b3_ref, atol=1e-9):
                 problema_referencia = False
 
         # Check a data anterior
         if ant_date in all_rates and n_dias_ant in all_rates[ant_date].index:
-            preco_b3_ant = all_rates[ant_date].loc[n_dias_ant, 'taxas252']
+            preco_b3_ant = all_rates[ant_date].loc[n_dias_ant, 'taxas252'] * 100
             df.loc[index, 'preco_b3_anterior'] = preco_b3_ant
             if np.isclose(row['preco_data_anterior'], preco_b3_ant, atol=1e-9):
                 problema_anterior = False
