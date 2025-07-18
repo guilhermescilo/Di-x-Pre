@@ -3,66 +3,16 @@ import numpy as np
 from load_and_filter import load_and_filter_data
 from b3_scraper import get_b3_rates_uc
 
-def compare_prices_and_identify_problems_revised(df, all_rates):
+def calculate_mtm(df):
     """
-    Compares prices from the dataframe with B3 rates using n_dias_corridos.
+    Calculates the MtM result using the provided formula and B3 data.
     """
-    df['n_dias_corridos'] = df['n_dias_corridos'].astype(int)
-    df['n_dias_corridos_anterior'] = df['n_dias_corridos_anterior'].astype(int)
-    df['problema'] = False
-    df['preco_b3_referencia'] = None
-    df['preco_b3_anterior'] = None
+    df['preco_b3_referencia'] = np.nan
+    df['preco_b3_anterior'] = np.nan
+    df['resultado_correto'] = np.nan
+    df['validacao_b3'] = 'Falhou'
 
-    for index, row in df.iterrows():
-        ref_date = pd.to_datetime(row['data_referencia']).date()
-        ant_date = pd.to_datetime(row['data_anterior']).date()
-        n_dias = row['n_dias_corridos']
-        n_dias_ant = row['n_dias_corridos_anterior']
-
-        problema_referencia = True
-        problema_anterior = True
-
-        # Check a data de referência
-        if ref_date in all_rates and n_dias in all_rates[ref_date].index:
-            preco_b3_ref = all_rates[ref_date].loc[n_dias, 'taxas252'] * 100
-            df.loc[index, 'preco_b3_referencia'] = preco_b3_ref
-            if np.isclose(row['preco_data_referencia'], preco_b3_ref, atol=1e-9):
-                problema_referencia = False
-
-        # Check a data anterior
-        if ant_date in all_rates and n_dias_ant in all_rates[ant_date].index:
-            preco_b3_ant = all_rates[ant_date].loc[n_dias_ant, 'taxas252'] * 100
-            df.loc[index, 'preco_b3_anterior'] = preco_b3_ant
-            if np.isclose(row['preco_data_anterior'], preco_b3_ant, atol=1e-9):
-                problema_anterior = False
-
-        if problema_referencia or problema_anterior:
-            df.loc[index, 'problema'] = True
-
-    return df
-
-def calculate_correct_mtm_revised(df):
-    """
-    Calculates the correct MtM result for problematic operations.
-    """
-    df['resultado_correto'] = None
-
-    for index, row in df.iterrows():
-        if row['problema']:
-            preco_ref = row['preco_b3_referencia'] if pd.notna(row['preco_b3_referencia']) else row['preco_data_referencia']
-            preco_ant = row['preco_b3_anterior'] if pd.notna(row['preco_b3_anterior']) else row['preco_data_anterior']
-
-            resultado = (preco_ref - preco_ant) * row['quantidade']
-            if row['comprado/vendido'] == 'Vendido':
-                resultado *= -1
-            df.loc[index, 'resultado_correto'] = resultado
-
-    return df
-
-if __name__ == '__main__':
-    filtered_df = load_and_filter_data('case.xlsx')
-
-    unique_dates = pd.unique(filtered_df[['data_referencia', 'data_anterior']].values.ravel('K'))
+    unique_dates = pd.unique(df[['data_referencia', 'data_anterior']].values.ravel('K'))
     all_rates = {}
     for date_ns in unique_dates:
         ref_date = pd.to_datetime(date_ns).date()
@@ -70,19 +20,49 @@ if __name__ == '__main__':
         if rates_df is not None:
             all_rates[ref_date] = rates_df
 
-    if all_rates:
-        df_with_problems = compare_prices_and_identify_problems_revised(filtered_df, all_rates)
-        df_with_mtm = calculate_correct_mtm_revised(df_with_problems)
+    for index, row in df.iterrows():
+        ref_date = pd.to_datetime(row['data_referencia']).date()
+        ant_date = pd.to_datetime(row['data_anterior']).date()
+        n_dias = int(row['n_dias_corridos'])
+        n_dias_ant = int(row['n_dias_corridos_anterior'])
 
-        problematic_ops = df_with_mtm[df_with_mtm['problema']].copy()
+        preco_ref_b3 = np.nan
+        preco_ant_b3 = np.nan
 
-        output_columns = [
-            'id_trader', 'ativo', 'data_referencia', 'preco_data_referencia', 'preco_b3_referencia',
-            'data_anterior', 'preco_data_anterior', 'preco_b3_anterior', 'resultado', 'resultado_correto'
-        ]
+        if ref_date in all_rates and n_dias in all_rates[ref_date].index:
+            preco_ref_b3 = all_rates[ref_date].loc[n_dias, 'taxas252']
+            df.loc[index, 'preco_b3_referencia'] = preco_ref_b3 * 100
 
-        problematic_ops[output_columns].to_excel('validacao_mtm.xlsx', index=False)
-        print("Relatório 'validacao_mtm.xlsx' gerado com sucesso.")
+        if ant_date in all_rates and n_dias_ant in all_rates[ant_date].index:
+            preco_ant_b3 = all_rates[ant_date].loc[n_dias_ant, 'taxas252']
+            df.loc[index, 'preco_b3_anterior'] = preco_ant_b3 * 100
 
-    else:
-        print("Não foi possível obter as taxas da B3. A comparação não pode ser realizada.")
+        if pd.notna(preco_ref_b3) and pd.notna(preco_ant_b3):
+            df.loc[index, 'validacao_b3'] = 'Sucesso'
+
+            fator_compra_venda = -1 if row['comprado/vendido'] == 'C' else 1
+            pu_ref = 100000 / ((1 + preco_ref_b3) ** (row['n_dias_uteis'] / 252))
+            pu_ant = 100000 / ((1 + preco_ant_b3) ** (row['n_dias_uteis_anterior'] / 252))
+            fator_cdi = row['fator_cdi'] if pd.notna(row['fator_cdi']) else 1
+
+            resultado = fator_compra_venda * row['quantidade'] * (pu_ref - pu_ant * fator_cdi)
+            df.loc[index, 'resultado_correto'] = resultado
+        else:
+            # Se não houver dados da B3, não podemos calcular o resultado correto
+            df.loc[index, 'resultado_correto'] = 'Dados da B3 indisponíveis'
+
+
+    return df
+
+if __name__ == '__main__':
+    filtered_df = load_and_filter_data('case.xlsx')
+
+    final_df = calculate_mtm(filtered_df.copy())
+
+    output_columns = [
+        'id_trader', 'ativo', 'data_referencia', 'preco_data_referencia', 'preco_b3_referencia',
+        'data_anterior', 'preco_data_anterior', 'preco_b3_anterior', 'resultado', 'resultado_correto', 'validacao_b3'
+    ]
+
+    final_df[output_columns].to_excel('validacao_mtm_final.xlsx', index=False)
+    print("Relatório 'validacao_mtm_final.xlsx' gerado com sucesso.")
