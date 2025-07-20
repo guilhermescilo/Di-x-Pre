@@ -59,9 +59,16 @@ if __name__ == '__main__':
 
     final_df = calculate_mtm(filtered_df.copy())
 
+    # Adiciona a coluna de verificação de erro
+    final_df['status_validacao'] = 'OK'
+    mask = pd.to_numeric(final_df['resultado_correto'], errors='coerce').notna()
+    diff = (final_df.loc[mask, 'resultado'] - final_df.loc[mask, 'resultado_correto']).abs().round(3)
+    final_df.loc[mask & (diff > 0), 'status_validacao'] = 'ERRO'
+
+
     output_columns = [
         'id_trader', 'ativo', 'data_referencia', 'preco_data_referencia', 'preco_b3_referencia',
-        'data_anterior', 'preco_data_anterior', 'preco_b3_anterior', 'resultado', 'resultado_correto', 'validacao_b3'
+        'data_anterior', 'preco_data_anterior', 'preco_b3_anterior', 'resultado', 'resultado_correto', 'validacao_b3', 'status_validacao'
     ]
 
     final_df[output_columns].to_excel('validacao_mtm_final.xlsx', index=False)
