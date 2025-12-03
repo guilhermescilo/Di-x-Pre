@@ -1,0 +1,7 @@
+pandas
+undetected-chromedriver
+beautifulsoup4
+openpyxl
+lxml
+requests
+workalendar
